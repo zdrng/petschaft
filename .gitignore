@@ -23,3 +23,6 @@ __pycache__/
 /fuzz/coverage
 /fuzz/corpus/*/*
 !/fuzz/corpus/*/seed-*
+
+# macOS Finder
+.DS_Store

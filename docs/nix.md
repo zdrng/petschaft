@@ -128,6 +128,35 @@ The THP pairing credential is stored in the Secret Service, so a provider must r
 session (for example `services.gnome.gnome-keyring.enable = true` or KWallet). Without one,
 `pets` does not store the credential and pairs again each time (there is no plaintext fallback).
 
+### Bluetooth (Linux)
+
+There are two pairings: the Bluetooth bond (operating system) and the THP pairing
+(`pets pair`, code on the Trezor). The Trezor accepts only bonded, encrypted
+connections, and creating the bond needs a BlueZ pairing agent (the Trezor expects
+`DisplayYesNo`). macOS shows its own dialog; on Linux the helper has no agent, so create
+the bond once before `pets pair`, with the Trezor in pairing mode:
+
+```
+$ bluetoothctl
+[bluetooth]# agent KeyboardDisplay
+[bluetooth]# default-agent
+[bluetooth]# scan le          # wait for "Trezor Safe 7 (…)"
+[bluetooth]# pair <address>   # confirm the code on both sides
+[bluetooth]# trust <address>
+[bluetooth]# scan off
+[bluetooth]# disconnect <address>
+```
+
+A desktop Bluetooth dialog (GNOME, KDE, blueman) works too. Without a bond `pets` reports
+"Bluetooth: the Trezor is not paired with this computer". The bond survives reboots
+(`/var/lib/bluetooth`); remove it on both sides before pairing again.
+
+BlueZ does not complete a connection to an LE device it does not see. trezorlib stops
+scanning before it connects (with a 3 s timeout), so on Linux the helper keeps a scan
+running until the connection is up and allows 30 s, as Trezor Suite does
+(`packages/transport-bluetooth`, `scan_coordinator.rs`). A plain `bluetoothctl connect`
+without a running scan hangs for the same reason; that says nothing about `pets`.
+
 ## nix-darwin
 
 ```nix

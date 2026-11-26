@@ -105,8 +105,9 @@ pets apk verify app.apk
 ```
 
 **Linux**: for Bluetooth, pair the Trezor once in the system Bluetooth dialog (or with
-`bluetoothctl`). USB needs the Trezor udev rules, which the NixOS module installs
-(`programs.petschaft.udev`, on by default; [docs/nix.md](docs/nix.md)).
+`bluetoothctl`, see [docs/nix.md](docs/nix.md#bluetooth-linux)) before `pets pair`. USB
+needs the Trezor udev rules, which the NixOS module installs (`programs.petschaft.udev`,
+on by default; [docs/nix.md](docs/nix.md)).
 
 ## Security model
 

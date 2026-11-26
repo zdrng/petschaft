@@ -10,6 +10,7 @@ Run as: python3 -I -B helper/petschaft_helper.py
 
 from __future__ import annotations
 
+import atexit
 import base64
 import binascii
 import json
@@ -32,6 +33,19 @@ MAX_VISUAL = 128
 MAX_MESSAGE = 256
 U32_MAX = 0xFFFF_FFFF
 BLE_SCAN_TIMEOUT = 15.0  # seconds; the host allows 120 s for `hello` until the first frame
+BLE_CONNECT_TIMEOUT = 30.0  # seconds, Linux only (trezorlib: 3 s); as Trezor Suite
+# Markers in builtin exceptions, so that they survive the pipe from the BLE child process
+# (an exception class of this module would not unpickle there: `__mp_main__` vs `__main__`).
+BLE_NOT_PAIRED = "petschaft:ble-not-paired"
+BLE_CONNECT_TIMED_OUT = "petschaft:ble-connect-timed-out"
+BLUEZ_AUTH_ERRORS = frozenset(
+    {
+        "org.bluez.Error.AuthenticationFailed",
+        "org.bluez.Error.AuthenticationCanceled",
+        "org.bluez.Error.AuthenticationRejected",
+        "org.bluez.Error.AuthenticationTimeout",
+    }
+)
 ALWAYS_FATAL = frozenset(
     {"bad_request", "device_not_found", "device_not_initialized", "pairing_failed", "internal"}
 )
@@ -379,6 +393,14 @@ def trezor_error(exc: Exception) -> HelperError:
         return HelperError("device_error", f"device reported failure: {code}")
     if isinstance(exc, ex.OutdatedFirmwareError | ex.MissingCapability | ex.InvalidSessionError):
         return HelperError("device_error", f"device error ({name})")
+    if isinstance(exc, ConnectionRefusedError) and exc.args == (BLE_NOT_PAIRED,):
+        msg = "Bluetooth: the Trezor is not paired with this computer; pair it once with the "
+        msg += "system (e.g. bluetoothctl), see docs/nix.md"
+        return HelperError("device_error", msg, fatal=True)
+    if isinstance(exc, TimeoutError) and exc.args == (BLE_CONNECT_TIMED_OUT,):
+        msg = "Bluetooth: connecting to the Trezor timed out (is it awake, in range and not "
+        msg += "connected to another computer?)"
+        return HelperError("device_error", msg, fatal=True)
     if isinstance(exc, ex.TrezorException | OSError):  # transport, THP, locked, busy, ...
         return HelperError("device_error", f"device communication failed ({name})", fatal=True)
     return HelperError("internal", f"unexpected {name}")
@@ -416,12 +438,114 @@ def _enumerate(kind: str) -> list[Any]:
     previous = signal.signal(signal.SIGALRM, _raise_scan_timeout)
     signal.setitimer(signal.ITIMER_REAL, BLE_SCAN_TIMEOUT)
     try:
-        return list(BleTransport.enumerate())
+        return list(ble_transport().enumerate())
     except Exception:  # noqa: BLE001 - Bluetooth off/unauthorized/timeout: "no device"
         return []
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, previous)
+
+
+# ---- Bluetooth on Linux --------------------------------------------------------------------
+#
+# trezorlib scans for 3 s, stops the scan and then connects with a 3 s timeout. BlueZ does
+# not complete a connection to an LE device it does not see: with the scan stopped it waits
+# in a filtered passive scan that never reports the (bonded) Trezor, and the connection
+# times out. Trezor Suite keeps the scan running during a connection on Linux for this
+# reason (trezor-suite packages/transport-bluetooth/src/server/scan_coordinator.rs). On
+# Linux the helper does the same in its own subclass of trezorlib's BLE process; macOS
+# (CoreBluetooth) keeps trezorlib's behaviour unchanged.
+
+
+def ble_transport() -> Any:
+    """trezorlib's BleTransport, or on Linux a subclass whose BLE process connects as above."""
+    from trezorlib.transport.ble import BleProxy, BleTransport
+
+    if not sys.platform.startswith("linux"):
+        return BleTransport
+
+    class LinuxBleProxy(BleProxy):
+        def __init__(self) -> None:  # replaces trezorlib's, which would start its own child
+            parent_pipe, child_pipe = multiprocessing.Pipe()
+            self.pipe = parent_pipe
+            self.process = multiprocessing.Process(
+                target=run_linux_ble, args=(child_pipe,), daemon=True
+            )
+            self.process.start()
+            atexit.register(self._shutdown)
+
+    class LinuxBleTransport(BleTransport):
+        @classmethod
+        def ble_proxy(cls) -> Any:
+            # Stored on BleTransport: the transports that enumerate() returns are plain
+            # BleTransport objects, and stop_ble() looks there too.
+            if BleTransport._ble is None:
+                BleTransport._ble = LinuxBleProxy()
+            return BleTransport._ble
+
+    return LinuxBleTransport
+
+
+def run_linux_ble(pipe: Any) -> None:
+    """Entry point of the BLE child process on Linux (started with "spawn", see main; it
+    inherits the core dump limit, but not the logging setup)."""
+    logging.disable(logging.CRITICAL)  # as in the parent: trezorlib logs must never carry secrets
+    linux_ble_async()(pipe)
+
+
+def linux_ble_async() -> Any:
+    """trezorlib's BleAsync with a connect() that keeps scanning until it is connected."""
+    import asyncio
+
+    from bleak import BleakClient, BleakScanner
+    from bleak.exc import BleakDBusError, BleakError
+    from trezorlib.transport import ble
+
+    class LinuxBleAsync(ble.BleAsync):
+        async def connect(self, address: str) -> None:
+            if not self.did_scan:
+                await self.scan()
+            periph = self.devices.get(address)
+            if periph is None:
+                raise RuntimeError("BLE device not found")
+            if periph.client is not None:
+                return
+            client = BleakClient(
+                periph.device, services=[ble.TREZOR_SERVICE_UUID], timeout=BLE_CONNECT_TIMEOUT
+            )
+            # Started before Connect: starting a discovery during a connection can abort it.
+            scanner = BleakScanner()
+            await scanner.start()
+            try:
+                await client.connect()
+            except TimeoutError:
+                raise TimeoutError(BLE_CONNECT_TIMED_OUT) from None
+            finally:
+                with suppress(BleakError, OSError):
+                    await scanner.stop()
+            try:
+                # Pairing needs a BlueZ agent (the Trezor expects DisplayYesNo); the helper has
+                # none, so the bond must exist already (bleak skips Pair for a paired device).
+                try:
+                    await client.pair()
+                except BleakDBusError as err:
+                    if err.dbus_error in BLUEZ_AUTH_ERRORS:
+                        raise ConnectionRefusedError(BLE_NOT_PAIRED) from None
+                    raise
+                queue: asyncio.Queue[bytearray] = asyncio.Queue()
+
+                async def read_callback(_characteristic: Any, data: bytearray) -> None:
+                    await queue.put(data)
+
+                await client.start_notify(ble.TREZOR_CHARACTERISTIC_TX, read_callback)
+            except BaseException:
+                with suppress(Exception):  # best effort: the original error is what counts
+                    await client.disconnect()
+                raise
+            periph.client = client
+            periph.queue = queue  # set only after the notifications run, as trezorlib does
+
+    return LinuxBleAsync
 
 
 def find_transport(kind: str) -> Any:

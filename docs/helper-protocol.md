@@ -148,7 +148,9 @@ not interpret them; the Rust side validates and verifies.
 
 ## Timeouts
 
-The helper imposes none (user confirmations can take long). The host enforces them:
+The helper imposes none (user confirmations can take long), except two bounds on Bluetooth
+setup: the BLE scan (15 s, then "no device") and, on Linux, the BLE connection (30 s,
+then a fatal `device_error`). The host enforces the rest:
 120 s for `hello` until the first event or `ready` (covers BLE discovery, PIN entry
 and the OS Bluetooth pairing dialog, which produce no event), 180 s per request overall; on
 timeout it kills the helper.

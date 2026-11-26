@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import json
 import multiprocessing
+import pickle
 import random
 import re
 import signal
@@ -807,12 +809,32 @@ def test_trezor_error_mapping() -> None:
         (OSError("secret-text"), "device_error", True),
         (RuntimeError("secret-text"), "internal", True),
         (KeyError("secret-text"), "internal", True),
+        (ConnectionRefusedError(th.BLE_NOT_PAIRED), "device_error", True),
+        (ConnectionRefusedError("secret-text"), "device_error", True),
+        (TimeoutError(th.BLE_CONNECT_TIMED_OUT), "device_error", True),
+        (TimeoutError("secret-text"), "device_error", True),
     ]
     for exc, code, fatal in cases:
         err = th.trezor_error(exc)
         assert (err.code, err.fatal) == (code, fatal), exc
         assert "secret" not in err.message
     assert th.trezor_error(failure(messages.FailureType.DataError)).message.endswith("DataError")
+
+
+def test_ble_markers_get_their_own_message() -> None:
+    not_paired = th.trezor_error(ConnectionRefusedError(th.BLE_NOT_PAIRED)).message
+    timed_out = th.trezor_error(TimeoutError(th.BLE_CONNECT_TIMED_OUT)).message
+    assert "not paired" in not_paired and "bluetoothctl" in not_paired
+    assert "timed out" in timed_out
+    for msg in (not_paired, timed_out):
+        assert msg.startswith("Bluetooth: ") and len(msg) <= th.MAX_MESSAGE
+    # an unmarked exception of the same type keeps the generic message
+    generic = th.trezor_error(ConnectionRefusedError("x")).message
+    assert generic == "device communication failed (ConnectionRefusedError)"
+    # the markers cross the pipe from the BLE child process unchanged
+    for exc in (ConnectionRefusedError(th.BLE_NOT_PAIRED), TimeoutError(th.BLE_CONNECT_TIMED_OUT)):
+        back = pickle.loads(pickle.dumps(exc))  # noqa: S301 - own bytes, test only
+        assert type(back) is type(exc) and back.args == exc.args
 
 
 def test_mapped_passes_helper_error_and_eof_through() -> None:
@@ -928,6 +950,191 @@ def test_ble_scan_timer_cancelled_after_success(transports: dict[str, Any]) -> N
     assert th.find_transport("ble") == "B"
     assert signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0)
     assert signal.getsignal(signal.SIGALRM) == previous
+
+
+# ---- Bluetooth on Linux (bleak and the child process faked, no adapter, no device) --------
+
+
+def test_ble_transport_is_trezorlibs_outside_linux(monkeypatch: pytest.MonkeyPatch) -> None:
+    from trezorlib.transport.ble import BleTransport
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert th.ble_transport() is BleTransport
+
+
+def test_linux_ble_transport_starts_the_helpers_child_lazily(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from trezorlib.transport.ble import BleProxy, BleTransport
+
+    started: list[Any] = []
+
+    class FakeProcess:
+        def __init__(self, target: Any, args: tuple[Any, ...], daemon: bool) -> None:
+            self.target, self.daemon = target, daemon
+
+        def start(self) -> None:
+            started.append(self)
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(BleTransport, "_ble", None)
+    monkeypatch.setattr(th.multiprocessing, "Process", FakeProcess)
+    monkeypatch.setattr(th.atexit, "register", lambda _f: None)
+    cls = th.ble_transport()
+    assert issubclass(cls, BleTransport) and cls is not BleTransport
+    assert started == []  # nothing runs before the first scan
+    proxy = cls.ble_proxy()
+    assert isinstance(proxy, BleProxy)
+    assert BleTransport._ble is proxy  # where trezorlib's transports and stop_ble() look
+    assert cls.ble_proxy() is proxy and BleTransport.ble_proxy() is proxy
+    assert len(started) == 1
+    assert started[0].target is th.run_linux_ble and started[0].daemon
+
+
+class FakeBle:
+    """Records the order of bleak calls made by LinuxBleAsync.connect."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import bleak
+
+        self.events: list[str] = []
+        self.client_kwargs: dict[str, Any] = {}
+        self.connect_error: BaseException | None = None
+        self.pair_error: BaseException | None = None
+        self.stop_error: BaseException | None = None
+        rec = self
+
+        class Scanner:
+            async def start(self) -> None:
+                rec.events.append("scan_start")
+
+            async def stop(self) -> None:
+                rec.events.append("scan_stop")
+                if rec.stop_error is not None:
+                    raise rec.stop_error
+
+        class Client:
+            def __init__(self, device: Any, **kwargs: Any) -> None:
+                rec.client_kwargs = kwargs
+
+            async def connect(self) -> None:
+                rec.events.append("connect")
+                if rec.connect_error is not None:
+                    raise rec.connect_error
+
+            async def pair(self) -> None:
+                rec.events.append("pair")
+                if rec.pair_error is not None:
+                    raise rec.pair_error
+
+            async def start_notify(self, _uuid: str, _callback: Any) -> None:
+                rec.events.append("start_notify")
+
+            async def disconnect(self) -> None:
+                rec.events.append("disconnect")
+
+        monkeypatch.setattr(bleak, "BleakScanner", Scanner)
+        monkeypatch.setattr(bleak, "BleakClient", Client)
+        cls = th.linux_ble_async()
+        self.ble = cls.__new__(cls)  # without __init__, which would run the event loop
+        from trezorlib.transport.ble import Peripheral
+
+        self.periph = Peripheral(device=SimpleNamespace(address="A"), adv_data=None)  # type: ignore[arg-type]
+        self.ble.devices = {"A": self.periph}
+        self.ble.did_scan = True
+
+    def connect(self) -> None:
+        asyncio.run(self.ble.connect("A"))
+
+
+@pytest.fixture
+def fake_ble(monkeypatch: pytest.MonkeyPatch) -> FakeBle:
+    return FakeBle(monkeypatch)
+
+
+def test_linux_ble_connect_scans_until_connected(fake_ble: FakeBle) -> None:
+    from trezorlib.transport.ble import TREZOR_SERVICE_UUID
+
+    fake_ble.connect()
+    assert fake_ble.events == ["scan_start", "connect", "scan_stop", "pair", "start_notify"]
+    assert fake_ble.client_kwargs == {
+        "services": [TREZOR_SERVICE_UUID],
+        "timeout": th.BLE_CONNECT_TIMEOUT,
+    }
+    assert th.BLE_CONNECT_TIMEOUT == 30.0
+    assert fake_ble.periph.client is not None and fake_ble.periph.queue is not None
+    fake_ble.connect()  # already connected: no further bleak calls
+    assert fake_ble.events[-1] == "start_notify" and len(fake_ble.events) == 5
+
+
+def test_linux_ble_connect_timeout_is_marked(fake_ble: FakeBle) -> None:
+    fake_ble.connect_error = TimeoutError()
+    with pytest.raises(TimeoutError) as info:
+        fake_ble.connect()
+    assert info.value.args == (th.BLE_CONNECT_TIMED_OUT,)
+    assert fake_ble.events == ["scan_start", "connect", "scan_stop"]
+    assert fake_ble.periph.client is None
+
+
+def test_linux_ble_connect_stops_the_scan_on_any_error(fake_ble: FakeBle) -> None:
+    from bleak.exc import BleakError
+
+    fake_ble.connect_error = BleakError("secret-text")
+    with pytest.raises(BleakError):
+        fake_ble.connect()
+    assert fake_ble.events == ["scan_start", "connect", "scan_stop"]
+
+
+def test_linux_ble_failed_scan_stop_does_not_mask_success(fake_ble: FakeBle) -> None:
+    from bleak.exc import BleakError
+
+    fake_ble.stop_error = BleakError("InProgress")
+    fake_ble.connect()
+    assert fake_ble.periph.client is not None
+
+
+@pytest.mark.parametrize("name", sorted(th.BLUEZ_AUTH_ERRORS))
+def test_linux_ble_missing_bond_is_marked(fake_ble: FakeBle, name: str) -> None:
+    from bleak.exc import BleakDBusError
+
+    fake_ble.pair_error = BleakDBusError(name, ["Authentication Failed"])
+    with pytest.raises(ConnectionRefusedError) as info:
+        fake_ble.connect()
+    assert info.value.args == (th.BLE_NOT_PAIRED,)
+    assert fake_ble.events == ["scan_start", "connect", "scan_stop", "pair", "disconnect"]
+    assert fake_ble.periph.client is None and fake_ble.periph.queue is None
+
+
+def test_linux_ble_other_dbus_errors_pass_through(fake_ble: FakeBle) -> None:
+    from bleak.exc import BleakDBusError
+
+    fake_ble.pair_error = BleakDBusError("org.bluez.Error.Failed", ["x"])
+    with pytest.raises(BleakDBusError):
+        fake_ble.connect()
+    assert fake_ble.events[-1] == "disconnect" and fake_ble.periph.client is None
+
+
+def test_trezorlib_ble_internals_still_match() -> None:
+    """LinuxBleAsync/LinuxBleProxy rely on these (trezorlib >= 0.20.2, < 0.21)."""
+    import dataclasses
+    import inspect
+
+    from trezorlib.transport import ble
+
+    assert {f.name for f in dataclasses.fields(ble.Peripheral)} == {
+        "device",
+        "adv_data",
+        "client",
+        "queue",
+    }
+    for name in ("connect", "scan", "read", "write", "disconnect", "shutdown", "main"):
+        assert inspect.iscoroutinefunction(getattr(ble.BleAsync, name)), name
+    assert "did_scan" in inspect.getsource(ble.BleAsync.main)
+    assert "self.devices" in inspect.getsource(ble.BleAsync.main)
+    assert hasattr(ble.BleTransport, "_ble") and callable(ble.BleProxy._shutdown)
+    assert "Process(target=BleAsync" in inspect.getsource(ble.BleProxy.__init__)
+    for const in ("TREZOR_SERVICE_UUID", "TREZOR_CHARACTERISTIC_TX"):
+        assert isinstance(getattr(ble, const), str)
 
 
 def test_stop_ble_kills_the_proxy_process(monkeypatch: pytest.MonkeyPatch) -> None:
