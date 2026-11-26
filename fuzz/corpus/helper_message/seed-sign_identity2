@@ -1,0 +1,1 @@
+{"type":"sign_identity","id":1,"identity":{"proto":"ssh","user":"alice","host":"homelab","port":null,"path":null,"index":0},"curve":"ed25519","challenge_hidden":"AAEC","challenge_visual":"pets: Login homelab","passphrase":"standard"}

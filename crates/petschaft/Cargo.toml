@@ -1,0 +1,33 @@
+[package]
+name = "petschaft"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+petschaft-core.workspace = true
+petschaft-device.workspace = true
+petschaft-sshsig.workspace = true
+petschaft-fido2.workspace = true
+petschaft-agent.workspace = true
+petschaft-apk.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+getrandom.workspace = true
+base64.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+ed25519-dalek.workspace = true
+proptest.workspace = true
+# `pets apk` tests: a software P-256 "device".
+p256 = { workspace = true, features = ["ecdsa"] }
+
+[[bin]]
+name = "pets"
+path = "src/main.rs"

@@ -1,0 +1,27 @@
+[package]
+name = "petschaft-device"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+petschaft-core.workspace = true
+petschaft-helper-proto.workspace = true
+thiserror.workspace = true
+# `v1`: exactly one OS secret store per platform (macOS: Keychain Services via
+# apple-native-keyring-store; Linux/*BSD: Secret Service via zbus; Windows: Credential
+# Manager). No mock, sample/file or keyutils store is compiled in. See `store.rs`.
+keyring = { workspace = true, features = ["v1"] }
+
+[dev-dependencies]
+proptest.workspace = true
+tempfile.workspace = true
+ed25519-dalek.workspace = true
+p256 = { workspace = true, features = ["ecdsa"] }
+base64.workspace = true
+serde_json.workspace = true

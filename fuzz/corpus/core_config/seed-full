@@ -1,0 +1,40 @@
+owner = "alice_1"
+transport = "ble"
+
+[defaults]
+passphrase = "standard"
+
+[[identity]]
+name = "homelab"
+uri = "ssh://alice@homelab"
+curve = "ed25519"
+index = 0
+passphrase = "ask"
+fingerprint = "SHA256:2HS8bJpYBy7bDfWIQN304coFKT0s6CVPABFLYq+IX5E"
+
+[[identity]]
+name = "git-1"
+kind = "slip13"
+uri = "ssh://git@github.com:22/me"
+curve = "nist256p1"
+index = 4294967295
+comment = "Alice - work #2"
+
+[[identity]]
+name = "gpg"
+uri = "gpg://alice@example.org"
+curve = "ed25519"
+
+[[identity]]
+name = "sk"
+kind = "fido2"
+algorithm = "ed25519-sk"
+application = "ssh:homelab"
+user_verification = false
+resident = true
+
+[[identity]]
+name = "sk2"
+kind = "fido2"
+algorithm = "ecdsa-sk"
+fingerprint = "SHA256:sijgBpZVy7erVIEPkg1iFzd6kBJm7+kWQS9wf+ge734"

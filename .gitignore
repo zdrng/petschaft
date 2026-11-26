@@ -1,0 +1,25 @@
+# Nix
+result
+result-*
+
+# Rust
+/target
+**/*.rs.bk
+
+# Python
+__pycache__/
+
+# Local, never commit
+.direnv/
+*.local.toml
+.claude/settings.local.json
+.ruff_cache/
+.pytest_cache/
+
+# Fuzzing (fuzz/): build output, crashes and generated corpus entries.
+# Committed seeds are the corpus files named seed-*.
+/fuzz/target
+/fuzz/artifacts
+/fuzz/coverage
+/fuzz/corpus/*/*
+!/fuzz/corpus/*/seed-*

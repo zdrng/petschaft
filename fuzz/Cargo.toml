@@ -1,0 +1,112 @@
+# Coverage-guided fuzz targets (cargo-fuzz / libFuzzer). Its own workspace, excluded
+# from the main one and from `nix flake check`. How to run: docs/testing.md ("Fuzzing").
+[package]
+name = "petschaft-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "GPL-3.0-or-later"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+petschaft-core = { path = "../crates/petschaft-core" }
+petschaft-helper-proto = { path = "../crates/petschaft-helper-proto" }
+petschaft-sshsig = { path = "../crates/petschaft-sshsig" }
+petschaft-fido2 = { path = "../crates/petschaft-fido2" }
+petschaft-agent = { path = "../crates/petschaft-agent" }
+petschaft-apk = { path = "../crates/petschaft-apk" }
+
+[profile.release]
+debug = 1
+
+# No `forbid(unsafe_code)` here: `fuzz_target!` expands to `#[unsafe(no_mangle)]`.
+# The crates under test keep their own `forbid`.
+
+[[bin]]
+name = "helper_frame"
+path = "fuzz_targets/helper_frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "helper_message"
+path = "fuzz_targets/helper_message.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "core_config"
+path = "fuzz_targets/core_config.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "core_identity"
+path = "fuzz_targets/core_identity.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "core_device_key"
+path = "fuzz_targets/core_device_key.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "core_openssh_key"
+path = "fuzz_targets/core_openssh_key.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "core_fingerprint"
+path = "fuzz_targets/core_fingerprint.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sshsig_keyline"
+path = "fuzz_targets/sshsig_keyline.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fido2_pubkey_line"
+path = "fuzz_targets/fido2_pubkey_line.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "agent_session"
+path = "fuzz_targets/agent_session.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "agent_userauth"
+path = "fuzz_targets/agent_userauth.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "apk_parse"
+path = "fuzz_targets/apk_parse.rs"
+test = false
+doc = false
+bench = false

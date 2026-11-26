@@ -1,0 +1,20 @@
+[package]
+name = "petschaft-fido2"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "FIDO2 (sk-*) SSH keys on the Trezor via the FIDO-capable OpenSSH"
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+sha2.workspace = true
+base64.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+tempfile.workspace = true

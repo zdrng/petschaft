@@ -1,0 +1,53 @@
+# Ruff configuration for the petschaft Python helper (security-critical, keep strict).
+target-version = "py313"
+line-length = 100
+
+[lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "N",        # pep8-naming
+    "UP",       # pyupgrade
+    "B",        # bugbear
+    "S",        # bandit (security)
+    "BLE",      # no blind except
+    "A",        # builtin shadowing
+    "C4",       # comprehensions
+    "SIM",      # simplify
+    "RET",      # return statements
+    "PIE",
+    "PL",       # pylint
+    "RUF",
+    "ANN",      # type annotations
+    "TRY",      # exception handling
+    "PT",       # pytest style
+    "T10",      # debugger
+    "ISC",      # implicit string concatenation
+    "TID",      # banned imports
+    "PGH",      # no blanket type: ignore / noqa
+]
+ignore = [
+    "TRY003",   # long messages in exceptions: protocol error messages are the point
+    "PLR2004",  # magic values: protocol constants are clearer inline (32-byte digest etc.)
+    "PLR0911",  # many returns in the error mapping are intended
+    "PLC0415",  # trezorlib is imported lazily, only after stdout has been isolated
+    "ANN401",   # decoded JSON values are `Any` until validated
+]
+
+[lint.per-file-ignores]
+# Tests: assert is the point; subprocess runs sys.executable with fixed arguments; seeded
+# `random` drives property tests (no cryptographic use); test data needs many parameters.
+"test_*.py" = ["S101", "S603", "S106", "S311", "PT018", "PLR0913", "PLR0915", "TID251"]
+"fake_helper.py" = ["S101", "S603", "T201", "TID251", "PLR0913"]
+
+[lint.flake8-tidy-imports.banned-api]
+"pickle".msg = "never deserialize with pickle"
+"subprocess".msg = "the helper must not spawn processes (tests: per-file ignore)"
+"urllib".msg = "the helper must not use the network"
+"socket".msg = "the helper must not use the network"
+"http".msg = "the helper must not use the network"
+
+[lint.isort]
+# Same import order whether ruff runs from the repo root or from helper/.
+known-first-party = ["petschaft_helper", "fake_helper"]

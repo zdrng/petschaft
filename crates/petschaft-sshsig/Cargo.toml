@@ -1,0 +1,22 @@
+[package]
+name = "petschaft-sshsig"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+petschaft-core.workspace = true
+sha2.workspace = true
+base64.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+ed25519-dalek.workspace = true
+p256 = { workspace = true, features = ["ecdsa"] }
+tempfile.workspace = true
+proptest.workspace = true

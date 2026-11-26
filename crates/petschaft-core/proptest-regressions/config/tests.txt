@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc d02201a62599f3b9a3dbc78f77a4c355952acd9a281364e560c488dfd653e95c # shrinks to name = "-", slip = Slip13 { explicit_kind: false, uri: "ssh://-", curve: "ed25519", index: None, passphrase: None, fingerprint: None }, fido = Fido2 { algorithm: "ed25519-sk", application: None, user_verification: None, resident: None, fingerprint: None }, as_fido2 = false, slip_foreign = [("transport", "transport = \"usb\"")], fido_foreign = [("resident", "resident = false")], rot = 0
+cc 6995dea4ae84a10c0b67f81aea9c57a64c82cf4fbaab58a2ead9d488e0141b8c # shrinks to name = "-", slip = Slip13 { explicit_kind: false, uri: "ssh://a", curve: "ed25519", index: None, passphrase: None, fingerprint: None }, rot = 0

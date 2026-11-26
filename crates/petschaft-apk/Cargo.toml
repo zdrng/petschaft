@@ -1,0 +1,20 @@
+[package]
+name = "petschaft-apk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+sha2.workspace = true
+# Local verification of every device signature before it is embedded (fail closed).
+p256 = { workspace = true, features = ["ecdsa"] }
+
+[dev-dependencies]
+proptest.workspace = true
+tempfile.workspace = true
